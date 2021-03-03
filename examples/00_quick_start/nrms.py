@@ -253,7 +253,7 @@ def train_model(iterator, model, optimizer, hparam):
             # print("candidates.device: ", candidates.device)
             # print("model.device: ", next(model.parameters()).is_cuda)
             preds = model(histories, candidates)
-            step_data_loss = F.cross_entropy(preds, [0 for _ in range(pred.size(0))])
+            step_data_loss = F.cross_entropy(preds, [0 for _ in range(preds.size(0))])
             step_data_loss.backward()
             optimizer.step()
 
