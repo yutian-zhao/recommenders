@@ -252,7 +252,7 @@ def train_model(iterator, model, optimizer, hparam):
             candidates = torch.LongTensor(batch_data_input["candidate_title_batch"]).to(dev)
             # print("candidates.device: ", candidates.device)
             # print("model.device: ", next(model.parameters()).is_cuda)
-            # preds = model(histories, candidates)
+            preds = model(histories, candidates)
             # print("preds: ", type(preds))
             # print(preds)
             step_data_loss = F.cross_entropy(preds, torch.LongTensor([0 for _ in range(len(preds))]))
