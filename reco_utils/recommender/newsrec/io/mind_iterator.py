@@ -71,7 +71,7 @@ class MINDIterator(BaseIterator):
         news_title = [""]
 
         # with tf.io.gfile.GFile(news_file, "r") as rd:
-        with open(news_file, "r") as rd:
+        with open(news_file, "r", encoding="utf-8") as rd:
             for line in rd:
                 nid, vert, subvert, title, ab, url, _, _ = line.strip("\n").split(
                     self.col_spliter
@@ -109,7 +109,7 @@ class MINDIterator(BaseIterator):
         self.uindexes = []
 
         # with tf.io.gfile.GFile(behaviors_file, "r") as rd:
-        with open(behaviors_file, "r") as rd:
+        with open(behaviors_file, "r", encoding="utf-8") as rd:
             impr_index = 0
             for line in rd:
                 uid, time, history, impr = line.strip("\n").split(self.col_spliter)[-4:]

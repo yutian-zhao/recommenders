@@ -1,10 +1,13 @@
+import sys
+sys.path.append("../../")
+
+import math, os, time, copy
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
-import os
 import numpy as np
 from torch.autograd import Variable
-import time
+from tqdm import tqdm
 from reco_utils.recommender.newsrec.io.mind_iterator import MINDIterator
 from reco_utils.recommender.deeprec.deeprec_utils import cal_metric
 
@@ -73,30 +76,34 @@ class Encoder(nn.Module):
         self.dropout = nn.Dropout(p=dropout)
         self.V = nn.Linear(head_num*head_dim, attention_hidden_dim)
         self.q = nn.Linear(attention_hidden_dim, 1)
+        self.tanh = nn.Tanh()
 
     def forward(self, x):
-        h = torch.cat([self.V(torch.matmul(F.softmax(torch.matmul(self.Q(x), x.transpose(-2, -1)), dim=-2), x)) for Q, V in zip(Qs, Vs)], dim=-1)
+        h = torch.cat([V(torch.matmul(F.softmax(torch.matmul(Q(x), x.transpose(-2, -1)), dim=-2), x)) for Q, V in zip(self.Qs, self.Vs)], dim=-1)
         h = self.dropout(h)
         a = self.V(h)
-        a = nn.tanh(a)
-        a = self.q(h)
+        a = self.tanh(a)
+        a = self.q(a)
         z = torch.matmul(a.transpose(-2, -1), h)
         return torch.squeeze(z)
 
 class NewsEncoder(nn.Module):
     def __init__(self, hparam, embeddings, pe):
+        super().__init__()
         self.embeddings = embeddings
         self.pe = pe
         self.enc = Encoder(head_num=hparam.head_num, head_dim=hparam.head_dim, d_model=hparam.word_emb_dim, dropout=hparam.dropout, attention_hidden_dim=hparam.attention_hidden_dim)
 
     def forward(self, x):
-        candidates = self.pe1(self.embeddings(x))
+        candidates = self.embeddings(x)
+        candidates = self.pe(candidates)
         candidates = self.enc(candidates)
 
         return candidates
 
 class UserEncoder(nn.Module):
     def __init__(self, hparam, embeddings, pe1, pe2):
+        super().__init__()
         self.embeddings = embeddings
         self.pe1 = pe1
         self.pe2 = pe2
@@ -114,19 +121,19 @@ class UserEncoder(nn.Module):
 class NRMS(nn.Module):
     def __init__(self, hparam):
         super().__init__()
-        word_embeddings = np.load(wordEmb_file)
+        word_embeddings = torch.FloatTensor(np.load(hparam.wordEmb_file))
         self.embeddings = nn.Embedding.from_pretrained(word_embeddings, freeze=False, padding_idx=0)
         self.pe1 = PositionalEncoding(d_model=hparam.word_emb_dim, dropout=hparam.dropout)
         self.pe2 = PositionalEncoding(d_model=hparam.head_dim*hparam.head_num, dropout=hparam.dropout)
-        self.ne = NewsEncoder(hparam, embeddings, pe1)
-        self.ue = UserEncoder(hparam, embeddings, pe1, pe2)
+        self.ne = NewsEncoder(hparam, self.embeddings, self.pe1)
+        self.ue = UserEncoder(hparam, self.embeddings, self.pe1, self.pe2)
         # self.ne = NewsEncoder(head_num=hparam.head_num, head_dim=hparam.head_dim, d_model=hparam.word_emb_dim, dropout=hparam.dropout, attention_hidden_dim=hparam.attention_hidden_dim)
         # self.ue = NewsEncoder(head_num=hparam.head_num, head_dim=hparam.head_dim, d_model=hparam.head_dim*hparam.head_num, dropout=hparam.dropout, attention_hidden_dim=hparam.attention_hidden_dim)
 
 
-    def forward(self, x):
-        candidates = self.ne(x[1])
-        histories = self.ue(x[0])        
+    def forward(self, histories, candidates):
+        candidates = self.ne(candidates)
+        histories = self.ue(histories)        
         preds = torch.squeeze(torch.matmul(candidates, histories.unsqueeze(-1)))
 
         return preds
@@ -153,14 +160,16 @@ def run_eval(ue, ne, iterator, news_filename, behaviors_file):
     return res
 
 def user(ue, ne, batch_user_input):
-    user_input = batch_user_input["clicked_title_batch"]
+    user_input = torch.LongTensor(batch_user_input["clicked_title_batch"])
+    user_input.to(dev)
     user_vec = ue(ne(user_input))
     user_index = batch_user_input["impr_index_batch"]
 
     return user_index, user_vec
 
 def news(model, batch_news_input):
-    news_input = batch_news_input["candidate_title_batch"]
+    news_input = torch.LongTensor(batch_news_input["candidate_title_batch"])
+    news_input.to(dev)
     news_vec = model(news_input)
     news_index = batch_news_input["news_index_batch"]
 
@@ -237,10 +246,14 @@ def train_model(iterator, model, optimizer, hparam):
         )
 
         for batch_data_input in tqdm_util:
-            # to.dev
+            # print("dev:", dev)
             model.zero_grad()
-            preds = model([batch_data["clicked_title_batch"], batch_data["candidate_title_batch"]])
-            step_data_loss = F.cross_entropy(preds, [[1,0,0,0,0] for _ in range(pred.size(0)])
+            histories = torch.LongTensor(batch_data_input["clicked_title_batch"]).to(dev)
+            candidates = torch.LongTensor(batch_data_input["candidate_title_batch"]).to(dev)
+            # print("candidates.device: ", candidates.device)
+            # print("model.device: ", next(model.parameters()).is_cuda)
+            preds = model(histories, candidates)
+            step_data_loss = F.cross_entropy(preds, [0 for _ in range(pred.size(0))])
             step_data_loss.backward()
             optimizer.step()
 
@@ -326,12 +339,14 @@ def train_model(iterator, model, optimizer, hparam):
             }, os.path.join(hparam.data_path, 'checkpoint'))
 
 dev = 'cuda' if torch.cuda.is_available() else 'cpu'
+print("dev: ", dev)
+hparam = Hparam()
 iterator = MINDIterator(hparam)
 model = NRMS(hparam).to(dev)
 optimizer = torch.optim.Adam(model.parameters(), lr=hparam.learning_rate)
-hparam = Hparam()
 
-model.train_model(iterator, model, optimizer, hparam)
+
+train_model(iterator, model, optimizer, hparam)
 torch.save(model, os.path.join(hparam.data_path, 'model'))
 
 print("Training finished")
