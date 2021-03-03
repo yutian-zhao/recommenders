@@ -19,7 +19,7 @@ class Hparam():
         self.data_format = 'news'
         self.npratio = 4
 
-        self.show_step = 1000
+        self.show_step = 10
 
         self.attention_hidden_dim = 200
         self.word_emb_dim = 300
@@ -135,7 +135,7 @@ class NRMS(nn.Module):
         candidates = self.ne(candidates)
         histories = self.ue(histories)        
         preds = torch.squeeze(torch.matmul(candidates, histories.unsqueeze(-1)))
-        
+
         return preds
 
 def run_eval(ue, ne, iterator, news_filename, behaviors_file):
