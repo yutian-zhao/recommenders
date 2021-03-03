@@ -259,7 +259,7 @@ def train_model(iterator, model, optimizer, hparam):
             preds = model(histories, candidates)
             print("preds: ", type(preds))
             print(preds)
-            step_data_loss = F.cross_entropy(torch.FloatTensor(preds), torch.LongTensor([0 for _ in range(len(preds)))])
+            step_data_loss = F.cross_entropy(torch.FloatTensor(preds), torch.LongTensor([0 for _ in range(len(preds))]))
             step_data_loss.backward()
             optimizer.step()
 
