@@ -1,7 +1,7 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 # Licensed under the MIT License.
 
-import tensorflow as tf
+# import tensorflow as tf
 import numpy as np
 import pickle
 
@@ -30,7 +30,7 @@ class MINDIterator(BaseIterator):
     """
 
     def __init__(
-        self, hparams, npratio=-1, col_spliter="\t", ID_spliter="%",
+        self, hparams, col_spliter="\t", ID_spliter="%",
     ):
         """Initialize an iterator. Create necessary placeholders for the model.
         
@@ -45,7 +45,7 @@ class MINDIterator(BaseIterator):
         self.batch_size = hparams.batch_size
         self.title_size = hparams.title_size
         self.his_size = hparams.his_size
-        self.npratio = npratio
+        self.npratio = hparams.npratio
 
         self.word_dict = self.load_dict(hparams.wordDict_file)
         self.uid2index = self.load_dict(hparams.userDict_file)
@@ -70,7 +70,8 @@ class MINDIterator(BaseIterator):
         self.nid2index = {}
         news_title = [""]
 
-        with tf.io.gfile.GFile(news_file, "r") as rd:
+        # with tf.io.gfile.GFile(news_file, "r") as rd:
+        with open(news_file, "r") as rd:
             for line in rd:
                 nid, vert, subvert, title, ab, url, _, _ = line.strip("\n").split(
                     self.col_spliter
@@ -107,7 +108,8 @@ class MINDIterator(BaseIterator):
         self.impr_indexes = []
         self.uindexes = []
 
-        with tf.io.gfile.GFile(behaviors_file, "r") as rd:
+        # with tf.io.gfile.GFile(behaviors_file, "r") as rd:
+        with open(behaviors_file, "r") as rd:
             impr_index = 0
             for line in rd:
                 uid, time, history, impr = line.strip("\n").split(self.col_spliter)[-4:]
