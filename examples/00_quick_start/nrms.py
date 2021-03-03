@@ -156,7 +156,7 @@ def run_eval(ue, ne, iterator, news_filename, behaviors_file):
     #     _, group_labels, group_preds = run_slow_eval(
     #         news_filename, behaviors_file
     #     )
-    res = cal_metric(group_labels, group_preds, hparams.metrics)
+    res = cal_metric(group_labels, group_preds, hparam.metrics)
     return res
 
 def user(ue, ne, batch_user_input):
@@ -261,7 +261,7 @@ def train_model(iterator, model, optimizer, hparam):
 
             epoch_loss += step_data_loss
             step += 1
-            if step % hparams.show_step == 0:
+            if step % hparam.show_step == 0:
                 tqdm_util.set_description(
                     "step {0:d} , total_loss: {1:.4f}, data_loss: {2:.4f}".format(
                         step, epoch_loss / step, step_data_loss
