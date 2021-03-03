@@ -136,6 +136,10 @@ class NRMS(nn.Module):
         histories = self.ue(histories)        
         preds = torch.squeeze(torch.matmul(candidates, histories.unsqueeze(-1)))
 
+        print(type(candidates))
+        print(type(histories))
+        print(type(preds))
+
         return preds
 
 def run_eval(ue, ne, iterator, news_filename, behaviors_file):
@@ -253,7 +257,9 @@ def train_model(iterator, model, optimizer, hparam):
             # print("candidates.device: ", candidates.device)
             # print("model.device: ", next(model.parameters()).is_cuda)
             preds = model(histories, candidates)
-            step_data_loss = F.cross_entropy(preds, [0 for _ in range(len(preds))])
+            print("preds: ", type(preds))
+            print(preds)
+            step_data_loss = F.cross_entropy(torch.FloatTensor(preds), torch.LongTensor([0 for _ in range(len(preds)))])
             step_data_loss.backward()
             optimizer.step()
 
