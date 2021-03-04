@@ -344,7 +344,7 @@ def train_model(iterator, model, optimizer, hparam):
 
 
 
-dev = 'cpu' #'cuda' if torch.cuda.is_available() else 
+dev = 'cuda' if torch.cuda.is_available() else 'cpu' #
 print("dev: ", dev)
 hparam = Hparam()
 iterator = MINDIterator(hparam)
