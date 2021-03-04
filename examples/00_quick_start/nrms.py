@@ -46,6 +46,8 @@ class Hparam():
         self.wordEmb_file = os.path.join(self.data_path, "utils", "embedding.npy")
         self.userDict_file = os.path.join(self.data_path, "utils", "uid2index.pkl")
         self.wordDict_file = os.path.join(self.data_path, "utils", "word_dict.pkl")
+        self.test_news_file = None
+        self.test_behaviors_file = None
 
 class PositionalEncoding(nn.Module):
     "Implement the PE function."
@@ -272,6 +274,13 @@ def train_model(iterator, model, optimizer, hparam):
         train_time = train_end - train_start
         
         with torch.no_grad():
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'loss': epoch_loss,
+            }, os.path.join(hparam.data_path, 'checkpoint'))
+
             model.eval()
             eval_start = time.time()
 
@@ -282,15 +291,15 @@ def train_model(iterator, model, optimizer, hparam):
                 ]
             )
 
-            eval_res = run_eval(model.ue, model.ne, hparam.valid_news_file, hparam.valid_behaviors_file)
+            eval_res = run_eval(model.ue, model.ne, iterator, hparam.valid_news_file, hparam.valid_behaviors_file)
             eval_info = ", ".join(
                 [
                     str(item[0]) + ":" + str(item[1])
                     for item in sorted(eval_res.items(), key=lambda x: x[0])
                 ]
             )
-            if test_news_file is not None:
-                test_res = run_eval(test_news_file, test_behaviors_file)
+            if hparam.test_news_file is not None:
+                test_res = run_eval(model.ue, model.ne, iterator, hparam.test_news_file, hparam.test_behaviors_file)
                 test_info = ", ".join(
                     [
                         str(item[0]) + ":" + str(item[1])
@@ -300,7 +309,7 @@ def train_model(iterator, model, optimizer, hparam):
             eval_end = time.time()
             eval_time = eval_end - eval_start
 
-            if test_news_file is not None:
+            if hparam.test_news_file is not None:
                 print(
                     "at epoch {0:d}".format(epoch)
                     + "\ntrain info: "
@@ -333,14 +342,9 @@ def train_model(iterator, model, optimizer, hparam):
                 )
             )
 
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'loss': loss,
-            }, os.path.join(hparam.data_path, 'checkpoint'))
 
-dev = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+dev = 'cpu' #'cuda' if torch.cuda.is_available() else 
 print("dev: ", dev)
 hparam = Hparam()
 iterator = MINDIterator(hparam)
