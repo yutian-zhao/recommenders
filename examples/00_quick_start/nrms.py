@@ -73,20 +73,42 @@ class PositionalEncoding(nn.Module):
 class Encoder(nn.Module):
     def __init__(self, head_num, head_dim, d_model, dropout, attention_hidden_dim):
         super().__init__()
-        self.Qs = nn.ModuleList([copy.deepcopy(nn.Linear(d_model, d_model)) for _ in range(head_num)])
-        self.Vs = nn.ModuleList([copy.deepcopy(nn.Linear(d_model, head_dim)) for _ in range(head_num)])
+        # self.Qs = nn.ModuleList([nn.Linear(d_model, d_model) for _ in range(head_num)])
+        # self.Vs = nn.ModuleList([nn.Linear(d_model, head_dim) for _ in range(head_num)])
+        self.Qs = nn.Linear(d_model, d_model*head_num)
+        self.Vs = nn.Linear(d_model, head_dim*head_num)
         self.dropout = nn.Dropout(p=dropout)
         self.V = nn.Linear(head_num*head_dim, attention_hidden_dim)
         self.q = nn.Linear(attention_hidden_dim, 1)
         self.tanh = nn.Tanh()
+        self.head_num = head_num
+        self.head_dim = head_dim
 
     def forward(self, x):
-        h = torch.cat([V(torch.matmul(F.softmax(torch.matmul(Q(x), x.transpose(-2, -1)), dim=-2), x)) for Q, V in zip(self.Qs, self.Vs)], dim=-1)
+        # h = torch.cat([V(torch.matmul(F.softmax(torch.matmul(Q(x), x.transpose(-2, -1)), dim=-2), x)) for Q, V in zip(self.Qs, self.Vs)], dim=-1)
+        
+        size = x.size()
+        size1 = size[:-2]+(self.head_num, size[-2], size[-1])
+        size2 = size[:-2]+(self.head_num, size[-1], size[-2])
+        size3 = size[:-2]+(self.head_num, size[-2], self.head_dim)
+        size4 = size[:-2]+(size[-2], self.head_dim*self.head_num)
+        size5 = [1 for _ in range(len(size)+1)]
+        size5[-3] = self.head_num
+        xq = self.Qs(x)
+        xk = x.unsqueeze(-3).repeat(*size5)
+        weights = torch.matmul(xq.reshape(size1), xk.reshape(size2))
+        weights = F.softmax(weights, dim=-2)
+        xv = self.Vs(x)
+        h = torch.matmul(weights, xv.reshape(size3))
+        h = h.reshape(size4)
+
         h = self.dropout(h)
         a = self.V(h)
         a = self.tanh(a)
         a = self.q(a)
-        z = torch.matmul(a.transpose(-2, -1), h)
+        a = F.softmax(a, dim=-2)
+        a = a.transpose(-2, -1)
+        z = torch.matmul(a, h)
         return torch.squeeze(z)
 
 class NewsEncoder(nn.Module):
@@ -125,8 +147,8 @@ class NRMS(nn.Module):
         super().__init__()
         word_embeddings = torch.FloatTensor(np.load(hparam.wordEmb_file))
         self.embeddings = nn.Embedding.from_pretrained(word_embeddings, freeze=False, padding_idx=0)
-        self.pe1 = PositionalEncoding(d_model=hparam.word_emb_dim, dropout=hparam.dropout)
-        self.pe2 = PositionalEncoding(d_model=hparam.head_dim*hparam.head_num, dropout=hparam.dropout)
+        self.pe1 = PositionalEncoding(d_model=hparam.word_emb_dim, dropout=hparam.dropout, max_len=hparam.title_size*2)
+        self.pe2 = PositionalEncoding(d_model=hparam.head_dim*hparam.head_num, dropout=hparam.dropout,max_len=hparam.his_size*2)
         self.ne = NewsEncoder(hparam, self.embeddings, self.pe1)
         self.ue = UserEncoder(hparam, self.embeddings, self.pe1, self.pe2)
         # self.ne = NewsEncoder(head_num=hparam.head_num, head_dim=hparam.head_dim, d_model=hparam.word_emb_dim, dropout=hparam.dropout, attention_hidden_dim=hparam.attention_hidden_dim)
@@ -135,8 +157,10 @@ class NRMS(nn.Module):
 
     def forward(self, histories, candidates):
         candidates = self.ne(candidates)
-        histories = self.ue(histories)        
-        preds = torch.squeeze(torch.matmul(candidates, histories.unsqueeze(-1)))
+        histories = self.ue(histories)
+        histories = histories.unsqueeze(-1)        
+        preds = torch.matmul(candidates, histories)
+        preds = torch.squeeze(preds)
 
         return preds
 
@@ -151,7 +175,7 @@ def run_eval(ue, ne, iterator, news_filename, behaviors_file):
     """
 
     # if self.support_quick_scoring:
-    _, group_labels, group_preds = run_fast_eval(
+    group_impr_indexes, group_labels, group_preds = run_fast_eval(
         ue, ne, iterator, news_filename, behaviors_file
     )
     # else:
@@ -159,25 +183,29 @@ def run_eval(ue, ne, iterator, news_filename, behaviors_file):
     #         news_filename, behaviors_file
     #     )
     res = cal_metric(group_labels, group_preds, hparam.metrics)
-    return res
+    return res, group_impr_indexes, group_labels, group_preds
 
-def user(ue, ne, batch_user_input):
-    user_input = torch.LongTensor(batch_user_input["clicked_title_batch"])
-    user_input.to(dev)
-    user_vec = ue(ne(user_input))
+def user(ue, batch_user_input):
+    user_input = torch.LongTensor(batch_user_input["clicked_title_batch"]).to(dev)
+    user_vector = ue(user_input)
+    user_vec = user_vector.cpu().detach().numpy()
+    del user_input
+    del user_vector
     user_index = batch_user_input["impr_index_batch"]
 
     return user_index, user_vec
 
 def news(model, batch_news_input):
-    news_input = torch.LongTensor(batch_news_input["candidate_title_batch"])
-    news_input.to(dev)
-    news_vec = model(news_input)
+    news_input = torch.LongTensor(batch_news_input["candidate_title_batch"]).to(dev)
+    news_vector = model(news_input)
+    news_vec = news_vector.cpu().detach().numpy()
+    del news_input
+    del news_vector
     news_index = batch_news_input["news_index_batch"]
 
     return news_index, news_vec
 
-def run_user(ue, ne, iterator, news_filename, behaviors_file):
+def run_user(ue, iterator, news_filename, behaviors_file):
     # if not hasattr(self, "userencoder"):
     #     raise ValueError("model must have attribute userencoder")
 
@@ -186,7 +214,7 @@ def run_user(ue, ne, iterator, news_filename, behaviors_file):
     for batch_data_input in tqdm(
         iterator.load_user_from_file(news_filename, behaviors_file)
     ):
-        user_index, user_vec = user(ue, ne, batch_data_input)
+        user_index, user_vec = user(ue, batch_data_input)
         user_indexes.extend(np.reshape(user_index, -1))
         user_vecs.extend(user_vec)
 
@@ -208,8 +236,9 @@ def run_news(model, iterator, news_filename):
     return dict(zip(news_indexes, news_vecs))
 
 def run_fast_eval(ue, ne, iterator, news_filename, behaviors_file):
+    user_vecs = run_user(ue, iterator, news_filename, behaviors_file)
     news_vecs = run_news(ne, iterator, news_filename)
-    user_vecs = run_user(ue, ne, iterator, news_filename, behaviors_file)
+    
 
 
     group_impr_indexes = []
@@ -234,6 +263,9 @@ def run_fast_eval(ue, ne, iterator, news_filename, behaviors_file):
 
 def train_model(iterator, model, optimizer, hparam):
     print("Start training ...")
+    # model.eval()
+    # evl, _ = run_eval(model.ue, model.ne, iterator, hparam.valid_news_file, hparam.valid_behaviors_file)
+    # print(evl)
     for epoch in range(hparam.epochs):
         model.train()
         step = 0
@@ -257,23 +289,30 @@ def train_model(iterator, model, optimizer, hparam):
             preds = model(histories, candidates)
             # print("preds: ", type(preds))
             # print(preds)
-            step_data_loss = F.cross_entropy(preds, torch.LongTensor([0 for _ in range(len(preds))]))
+            grounds = torch.LongTensor([0 for _ in range(len(preds))]).to(dev)
+            step_data_loss = F.cross_entropy(preds, grounds)
             step_data_loss.backward()
             optimizer.step()
 
-            epoch_loss += step_data_loss
+            epoch_loss += float(step_data_loss)
             step += 1
             if step % hparam.show_step == 0:
                 tqdm_util.set_description(
                     "step {0:d} , total_loss: {1:.4f}, data_loss: {2:.4f}".format(
-                        step, epoch_loss / step, step_data_loss
+                        step, epoch_loss / step, float(step_data_loss)
                     )
                 )
-
+            del preds
+            del grounds
+            del histories
+            del candidates
+            del step_data_loss
         train_end = time.time()
         train_time = train_end - train_start
+        print("Epoch ", epoch, " training finished...")
         
         with torch.no_grad():
+            print("Saving checkpoints...")
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
@@ -291,7 +330,8 @@ def train_model(iterator, model, optimizer, hparam):
                 ]
             )
 
-            eval_res = run_eval(model.ue, model.ne, iterator, hparam.valid_news_file, hparam.valid_behaviors_file)
+            print("Evaluating")
+            eval_res, group_impr_indexes, group_labels, group_preds = run_eval(model.ue, model.ne, iterator, hparam.valid_news_file, hparam.valid_behaviors_file)
             eval_info = ", ".join(
                 [
                     str(item[0]) + ":" + str(item[1])
@@ -328,8 +368,8 @@ def train_model(iterator, model, optimizer, hparam):
                     + eval_info
                 )
 
-            group_impr_indexes, group_labels, group_preds = eval_res
-            with open(os.path.join(data_path, 'prediction.txt'), 'w') as f:
+            # group_impr_indexes, group_labels, group_preds = eval_res
+            with open(os.path.join(hparam.data_path, 'prediction.txt'), 'w') as f:
                 for impr_index, preds in tqdm(zip(group_impr_indexes, group_preds)):
                     impr_index += 1
                     pred_rank = (np.argsort(np.argsort(preds)[::-1]) + 1).tolist()
